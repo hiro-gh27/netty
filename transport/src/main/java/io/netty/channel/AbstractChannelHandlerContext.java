@@ -32,6 +32,11 @@ import io.netty.util.internal.SystemPropertyUtil;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 
+import io.opentracing.Scope;
+import io.opentracing.Span;
+import io.opentracing.noop.NoopSpan;
+import io.opentracing.noop.NoopTracerFactory;
+import io.opentracing.util.GlobalTracer;
 import java.net.SocketAddress;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
@@ -1112,6 +1117,7 @@ abstract class AbstractChannelHandlerContext extends DefaultAttributeMap
     }
 
     static final class WriteAndFlushTask extends AbstractWriteTask {
+        private static Span span;
 
         private static final Recycler<WriteAndFlushTask> RECYCLER = new Recycler<WriteAndFlushTask>() {
             @Override
@@ -1122,6 +1128,13 @@ abstract class AbstractChannelHandlerContext extends DefaultAttributeMap
 
         private static WriteAndFlushTask newInstance(
                 AbstractChannelHandlerContext ctx, Object msg,  ChannelPromise promise) {
+            Span parentSpan = GlobalTracer.get().activeSpan();
+            if (parentSpan != null){
+                //span = GlobalTracer.get().buildSpan("netty-message").asChildOf(parentSpan).start();
+                span = parentSpan;
+            }
+
+            logger.info("in netty sleep");
             WriteAndFlushTask task = RECYCLER.get();
             init(task, ctx, msg, promise);
             return task;
@@ -1133,8 +1146,21 @@ abstract class AbstractChannelHandlerContext extends DefaultAttributeMap
 
         @Override
         public void write(AbstractChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
+            Scope scope = null;
+            if (span!=null){
+                scope = GlobalTracer.get().activateSpan(span);
+            }
+
+
+            logger.info("in netty start");
             super.write(ctx, msg, promise);
             ctx.invokeFlush();
+            logger.info("in netty finish");
+
+            if (scope!=null){
+                scope.close();
+            }
+            span.finish();
         }
     }
 }
